@@ -126,12 +126,7 @@ if (process.env.NODE_ENV !== "production") {
 
   // Start the server with the initial port
   startServer(port);
-} else {
-  // For production (Render)
-  app.listen(port, () => {
-    console.log(`Server running in production mode on port ${port}`);
-  });
 }
 
-// Export for serverless environments if needed
+// For Vercel serverless functions
 module.exports = app;
