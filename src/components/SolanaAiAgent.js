@@ -53,9 +53,13 @@ const SolanaAiAgent = () => {
     // Set typing indicator immediately
     setTypingIndicator(true);
 
+    // Process content to enhance formatting
+    const processedContent = content.replace(
+      /Signature: ([a-zA-Z0-9]{20,})/g,
+      'Signature: <span class="transaction-signature">$1</span>'
+    );
+
     // Calculate a natural typing delay based on message length
-    // Average typing speed is about 80 words per minute, or ~400 characters per minute
-    // This means ~6.7 characters per second
     const messageLength = content.length;
     const baseDelay = 200; // Base delay of 200ms
     const typingDelay = Math.min(baseDelay + (messageLength / 6.7) * 100, 800); // Cap at 800ms
@@ -66,7 +70,7 @@ const SolanaAiAgent = () => {
       setTimeout(() => {
         setMessages((prevMessages) => [
           ...prevMessages,
-          { role: "assistant", content },
+          { role: "assistant", content: processedContent, isHTML: true },
         ]);
         setTypingIndicator(false);
       }, typingDelay);
@@ -408,7 +412,7 @@ const SolanaAiAgent = () => {
       );
 
       addAssistantMessage(
-        `Transaction successful! ✅\nSignature: ${
+        `Transaction successful! ✅\nSignature: \n${
           result.signature
         }\n\nRecipient received: ${result.fee.recipientAmountInSol.toFixed(
           6
@@ -877,7 +881,13 @@ IMPORTANT INSTRUCTIONS:
                 message.role === "user" ? "user-message" : "ai-message"
               }`}
             >
-              <div className="message-content">{message.content}</div>
+              <div className="message-content">
+                {message.isHTML ? (
+                  <div dangerouslySetInnerHTML={{ __html: message.content }} />
+                ) : (
+                  message.content
+                )}
+              </div>
               <div className="message-timestamp">
                 {new Date().toLocaleTimeString()}
               </div>
