@@ -27,40 +27,78 @@ app.post("/api/claude", async (req, res) => {
     console.log("Received Claude API request");
     const { messages, system } = req.body;
 
+    // Validate request body
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      console.error("Invalid request: missing or empty messages array");
+      return res
+        .status(400)
+        .json({ error: "Missing or invalid messages array" });
+    }
+
+    // Log more details about the request
+    console.log("Request headers:", req.headers);
+    console.log("Request body size:", JSON.stringify(req.body).length);
     console.log(
       "Making Claude API request with model:",
       process.env.CLAUDE_MODEL
     );
     console.log("API URL:", process.env.CLAUDE_API_URL);
 
-    const response = await fetch(process.env.CLAUDE_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": process.env.CLAUDE_API_KEY,
-        "anthropic-version": process.env.ANTHROPIC_VERSION,
-      },
-      body: JSON.stringify({
-        model: process.env.CLAUDE_MODEL,
-        messages,
-        system,
-        max_tokens: 1000,
-        temperature: 0.7,
-      }),
-    });
+    try {
+      const response = await fetch(process.env.CLAUDE_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": process.env.CLAUDE_API_KEY,
+          "anthropic-version": process.env.ANTHROPIC_VERSION,
+        },
+        body: JSON.stringify({
+          model: process.env.CLAUDE_MODEL,
+          messages,
+          system,
+          max_tokens: 1000,
+          temperature: 0.7,
+        }),
+      });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Claude API error:", response.status, errorText);
-      return res.status(response.status).json({ error: errorText });
+      // Log response headers for debugging
+      console.log("Claude API response status:", response.status);
+      console.log(
+        "Claude API response headers:",
+        Object.fromEntries([...response.headers])
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Claude API error:", response.status, errorText);
+        return res.status(response.status).json({
+          error: errorText,
+          status: response.status,
+          statusText: response.statusText,
+          method: req.method,
+          url: process.env.CLAUDE_API_URL,
+        });
+      }
+
+      const data = await response.json();
+      console.log("Claude API response received successfully");
+      res.json(data);
+    } catch (fetchError) {
+      console.error("Error during API call:", fetchError.message);
+      console.error("Error stack:", fetchError.stack);
+      return res.status(502).json({
+        error: `Error communicating with Claude API: ${fetchError.message}`,
+        type: "fetch_error",
+      });
     }
-
-    const data = await response.json();
-    console.log("Claude API response:", data);
-    res.json(data);
   } catch (error) {
-    console.error("Server error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    console.error("Server error:", error.message);
+    console.error("Error stack:", error.stack);
+    res.status(500).json({
+      error: "Internal server error",
+      message: error.message,
+      type: "server_error",
+    });
   }
 });
 
