@@ -2,6 +2,7 @@
   "name": "syndicate-website",
   "version": "0.1.0",
   "private": true,
+  "homepage": ".",
   "dependencies": {
     "@craco/craco": "^7.1.0",
     "@radix-ui/react-slot": "^1.1.2",
