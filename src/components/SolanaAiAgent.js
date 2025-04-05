@@ -228,6 +228,7 @@ const SolanaAiAgent = () => {
     }
 
     if (isNaN(amount) || parseFloat(amount) <= 0) {
+      console.log("hello");
       addAssistantMessage("The amount must be a positive number.");
       return;
     }
@@ -365,21 +366,63 @@ IMPORTANT INSTRUCTIONS:
 
       console.log("Using API URL:", apiUrl);
 
+      // Prepare request data
+      const requestData = {
+        messages: claudeMessages,
+        system: systemPrompt,
+      };
+
+      console.log("Request payload size:", JSON.stringify(requestData).length);
+
       // Call our backend proxy
       const response = await fetch(`${apiUrl}/claude`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          messages: claudeMessages,
-          system: systemPrompt,
-        }),
+        body: JSON.stringify(requestData),
       });
+
+      // Handle 405 Method Not Allowed error specifically
+      if (response.status === 405) {
+        console.error("405 Method Not Allowed error. This typically means:");
+        console.error("1. The API endpoint doesn't support POST method");
+        console.error(
+          "2. There might be a routing issue in your backend server"
+        );
+        console.error(
+          "3. A CORS or proxy configuration might be blocking the request"
+        );
+
+        // Try to get more detailed error information
+        const errorText = await response.text();
+
+        // Log detailed request info for debugging
+        console.error("Request details:", {
+          url: `${apiUrl}/claude`,
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
+
+        throw new Error(
+          `API Method Not Allowed (405): The API endpoint doesn't support the POST method. Detail: ${errorText}`
+        );
+      }
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error("API error:", response.status, errorText);
+        let errorJson;
+
+        // Try to parse as JSON if possible
+        try {
+          errorJson = JSON.parse(errorText);
+          console.error("API error response:", errorJson);
+        } catch (e) {
+          console.error("API error (not JSON):", response.status, errorText);
+        }
+
         throw new Error(`API error: ${response.status} - ${errorText}`);
       }
 
@@ -473,9 +516,32 @@ IMPORTANT INSTRUCTIONS:
       }
     } catch (error) {
       console.error("Error processing input:", error);
-      addAssistantMessage(
-        "I'm sorry, I encountered an error processing your request. Please try again."
-      );
+
+      // Provide more descriptive error messages based on error type
+      let errorMessage =
+        "I'm sorry, I encountered an error processing your request. Please try again.";
+
+      if (error.message.includes("API error: 405")) {
+        errorMessage =
+          "I'm having trouble communicating with my API. There seems to be a configuration issue with the server. The team has been notified.";
+      } else if (error.message.includes("API error:")) {
+        errorMessage =
+          "I'm having trouble accessing my AI capabilities right now. This could be due to network issues or server load. Please try again in a moment.";
+      } else if (
+        error.message.includes("Failed to fetch") ||
+        error.message.includes("NetworkError")
+      ) {
+        errorMessage =
+          "I'm having trouble connecting to my servers. Please check your internet connection and try again.";
+      } else if (
+        error.message.includes("timeout") ||
+        error.message.includes("Timed out")
+      ) {
+        errorMessage =
+          "The request took too long to process. This might be due to high server load. Please try again in a moment.";
+      }
+
+      addAssistantMessage(errorMessage);
     } finally {
       setLoading(false);
     }
