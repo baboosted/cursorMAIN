@@ -336,10 +336,11 @@ IMPORTANT INSTRUCTIONS:
 - For balance checks, include the address parameter if a specific address was provided, otherwise leave it empty.
 - For transfers, always include both recipient address and amount.
 - Only include ONE action tag per response.
-- IMPORTANT: If your response already contains the information that would be returned by an action (like the current slot number or a wallet balance), do NOT include the action tag. Only include action tags when additional system actions are needed.
+- IMPORTANT: If you include an action tag, DO NOT include the information that will be fetched by that action in your response. For example:
+  - GOOD: "I'll check the current slot for you. <check_slot>"
+  - BAD: "The current slot is ${currentSlot}. <check_slot>"
 - Example: "I'll check your balance. <check_balance:>"
 - Example: "I'll send 1 SOL to that address. <transfer_sol:8xrt45...zQ9,1.0>"
-- Example when already answering with the information: "The current Solana slot is 331379434." (no action tag needed)
 - If the user wants to check a specific address balance: "I'll check that address. <check_balance:8xrt45...zQ9>"
 - Do NOT include action tags if the user is just asking general questions.
 - Respond conversationally and briefly. Don't overexplain basic concepts unless asked.`;
@@ -512,17 +513,9 @@ IMPORTANT INSTRUCTIONS:
       // Display the cleaned response
       addAssistantMessage(response);
 
-      // Check if we should execute the action or if the response already contains the information
+      // Execute action if present
       if (action) {
-        // Determine if the action would be redundant based on the response content
-        const shouldSkipAction = skipRedundantAction(response, action);
-
-        if (!shouldSkipAction) {
-          // Only execute the action if it will provide new information
-          await executeAction(action);
-        } else {
-          console.log(`Skipping redundant action: ${action.type}`);
-        }
+        await executeAction(action);
       }
     } catch (error) {
       console.error("Error processing input:", error);
@@ -557,51 +550,45 @@ IMPORTANT INSTRUCTIONS:
     }
   };
 
-  // Determine if an action would be redundant based on the response content
-  const skipRedundantAction = (response, action) => {
-    if (!action) return false;
-
-    switch (action.type) {
-      case "check_slot":
-        // Skip if response already contains slot information
-        return /current\s+(?:solana\s+)?slot\s+(?:is|on).*\d+/i.test(response);
-
-      case "check_balance":
-        // Skip if response already contains balance information for the requested address
-        if (action.address) {
-          return new RegExp(
-            `address.*${action.address.substring(
-              0,
-              4
-            )}.*balance.*\\d+\\.?\\d*\\s*SOL`,
-            "i"
-          ).test(response);
-        } else {
-          // For connected wallet balance
-          return /your\s+(?:wallet\s+)?balance\s+is.*\d+\.?\d*\s*SOL/i.test(
-            response
-          );
-        }
-
-      case "connect_wallet":
-        // Skip if response already indicates successful connection
-        return /wallet\s+connected\s+successfully/i.test(response);
-
-      case "disconnect_wallet":
-        // Skip if response already indicates successful disconnection
-        return /wallet\s+disconnected\s+successfully/i.test(response);
-
-      case "transfer_sol":
-        // Always execute transfer actions - too important to skip
-        return false;
-
-      default:
-        return false;
-    }
-  };
-
   // Execute action extracted from Claude's response
   const executeAction = async (action) => {
+    // Check if we should skip the action based on the AI response already containing the information
+    const shouldSkipAction = () => {
+      // Get the last assistant message
+      const lastAssistantMessage = [...messages]
+        .reverse()
+        .find((msg) => msg.role === "assistant");
+      if (!lastAssistantMessage) return false;
+
+      const content = lastAssistantMessage.content.toLowerCase();
+
+      switch (action.type) {
+        case "check_slot":
+          // Skip if the response already mentions the slot number
+          return (
+            content.includes("slot") &&
+            content.includes(currentSlot?.toString() || "")
+          );
+        case "check_balance":
+          // Skip if the response already mentions the balance
+          if (!action.address && walletBalance !== null) {
+            return (
+              content.includes("balance") &&
+              content.includes(walletBalance.toFixed(1).toString())
+            );
+          }
+          return false;
+        default:
+          return false;
+      }
+    };
+
+    // Skip if the action would create a duplicate message
+    if (shouldSkipAction()) {
+      console.log(`Skipping duplicate action: ${action.type}`);
+      return;
+    }
+
     switch (action.type) {
       case "connect_wallet":
         await handleWalletConnection();
