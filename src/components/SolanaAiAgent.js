@@ -89,12 +89,19 @@ const SolanaAiAgent = () => {
         return;
       }
 
+      // Attempt to connect wallet
       const pubKey = await phantomWalletService.connect();
+
       setPublicKey(pubKey);
       setWalletConnected(true);
 
       // Get wallet balance
-      await fetchWalletBalance();
+      try {
+        await fetchWalletBalance();
+      } catch (balanceError) {
+        console.error("Error fetching balance after connection:", balanceError);
+        // Don't throw here, we'll still consider the connection successful
+      }
 
       // Add a message to the chat
       addAssistantMessage(
@@ -102,22 +109,52 @@ const SolanaAiAgent = () => {
       );
     } catch (err) {
       console.error("Error connecting wallet:", err);
-      addAssistantMessage(
-        `Failed to connect wallet: ${err.message}. Please try again.`
-      );
+      // Check if Phantom is installed
+      if (!phantomWalletService.isPhantomInstalled()) {
+        addAssistantMessage(
+          "It seems Phantom wallet is not installed. Please install the Phantom browser extension first."
+        );
+      } else {
+        addAssistantMessage(
+          `Failed to connect wallet: ${err.message}. Please try again.`
+        );
+      }
+
+      // Reset connection state on error
+      setWalletConnected(false);
+      setPublicKey("");
     } finally {
       setLoading(false);
     }
-  }, [walletConnected, fetchWalletBalance, addAssistantMessage, formatAddress]);
+  }, [
+    walletConnected,
+    publicKey,
+    fetchWalletBalance,
+    addAssistantMessage,
+    formatAddress,
+  ]);
 
   // Check if Phantom is installed and connected on component mount
   useEffect(() => {
     const isInstalled = phantomWalletService.isPhantomInstalled();
 
+    // Handle Phantom availability
     if (isInstalled) {
-      if (phantomWalletService.isConnected()) {
-        handleWalletConnection();
+      // For Phantom wallet, we need to use their events whenever possible
+      // as their isConnected property is unreliable on first load
+
+      // Check if publicKey exists instead of relying on isConnected
+      if (window?.solana?.publicKey) {
+        const publicKey = window.solana.publicKey.toString();
+        setPublicKey(publicKey);
+        setWalletConnected(true);
+
+        // Fetch balance separately
+        fetchWalletBalance().catch((err) => {
+          console.error("Error fetching initial balance:", err);
+        });
       }
+
       fetchCurrentSlot();
     } else {
       addAssistantMessage(
@@ -128,17 +165,13 @@ const SolanaAiAgent = () => {
     // Update blockchain slot every 30 seconds
     const interval = setInterval(fetchCurrentSlot, 30000);
 
-    // Cleanup function to disconnect wallet when component unmounts
+    // Cleanup function
     return () => {
       clearInterval(interval);
-      // Disconnect wallet if connected
-      if (phantomWalletService.isConnected()) {
-        phantomWalletService.disconnect().catch((err) => {
-          console.error("Error disconnecting wallet during cleanup:", err);
-        });
-      }
+      // NOTE: We don't automatically disconnect on unmount anymore
+      // as that can lead to confusing behavior for users
     };
-  }, [handleWalletConnection, addAssistantMessage]);
+  }, [fetchWalletBalance, addAssistantMessage]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -158,6 +191,67 @@ const SolanaAiAgent = () => {
       fetchWalletBalance();
     }
   }, [walletConnected, fetchWalletBalance]);
+
+  // Setup Phantom wallet event listeners
+  useEffect(() => {
+    const setupWalletEventListeners = () => {
+      if (!window?.solana) {
+        return;
+      }
+
+      // Listen for connect events
+      window.solana.on("connect", () => {
+        const publicKey = window.solana.publicKey.toString();
+        setPublicKey(publicKey);
+        setWalletConnected(true);
+
+        // Fetch balance after connection
+        fetchWalletBalance().catch((err) => {
+          console.error("Error fetching balance after connection event:", err);
+        });
+      });
+
+      // Listen for disconnect events
+      window.solana.on("disconnect", () => {
+        setWalletConnected(false);
+        setPublicKey("");
+        setWalletBalance(null);
+
+        // Notify user
+        addAssistantMessage(
+          "Your wallet was disconnected by Phantom. To continue using Solana features, please reconnect your wallet."
+        );
+      });
+
+      // Listen for account change events
+      window.solana.on("accountChanged", (newPublicKey) => {
+        if (newPublicKey) {
+          setPublicKey(newPublicKey.toString());
+
+          // Refresh balance when account changes
+          fetchWalletBalance().catch((err) => {
+            console.error("Error fetching balance after account change:", err);
+          });
+        } else {
+          setWalletConnected(false);
+          setPublicKey("");
+          setWalletBalance(null);
+        }
+      });
+    };
+
+    // Setup event listeners
+    setupWalletEventListeners();
+
+    // Cleanup function to remove event listeners
+    return () => {
+      if (window?.solana) {
+        window.solana.removeAllListeners("connect");
+        window.solana.removeAllListeners("disconnect");
+        window.solana.removeAllListeners("accountChanged");
+      }
+    };
+  }, [fetchWalletBalance, addAssistantMessage]);
 
   const handleDisconnect = async () => {
     try {
@@ -213,10 +307,56 @@ const SolanaAiAgent = () => {
   };
 
   const handleTransfer = async (recipientAddress, amount) => {
-    if (!walletConnected) {
+    // Double-check wallet connection status
+    const isActuallyConnected = phantomWalletService.isConnected();
+
+    // Handle wallet connection mismatch - try to reconnect before failing
+    if (!isActuallyConnected && walletConnected) {
+      // Show message to user
       addAssistantMessage(
-        "You need to connect your wallet first to make transfers."
+        "Your wallet appears to be disconnected. Attempting to reconnect automatically..."
       );
+
+      try {
+        // Try to reconnect
+        setLoading(true);
+        const pubKey = await phantomWalletService.connect();
+        setPublicKey(pubKey);
+
+        // Refresh balance
+        await fetchWalletBalance();
+
+        // Now we can proceed with the transfer
+      } catch (reconnectError) {
+        console.error("Failed to reconnect wallet:", reconnectError);
+        addAssistantMessage(
+          "I couldn't reconnect to your wallet automatically. Please click the Connect Wallet button and try your transfer again."
+        );
+
+        // Reset connection state
+        setWalletConnected(false);
+        setPublicKey("");
+        setLoading(false);
+        return;
+      } finally {
+        setLoading(false);
+      }
+    } else if (!walletConnected) {
+      addAssistantMessage(
+        "You need to connect your wallet first to make transfers. Please click the Connect Wallet button."
+      );
+      return;
+    }
+
+    // Re-check connection after potential reconnection attempt
+    if (!phantomWalletService.isConnected()) {
+      addAssistantMessage(
+        "There seems to be an issue with your wallet connection. Please try refreshing the page and connecting your wallet again."
+      );
+
+      // Reset connection state
+      setWalletConnected(false);
+      setPublicKey("");
       return;
     }
 
@@ -228,7 +368,6 @@ const SolanaAiAgent = () => {
     }
 
     if (isNaN(amount) || parseFloat(amount) <= 0) {
-      console.log("hello");
       addAssistantMessage("The amount must be a positive number.");
       return;
     }
@@ -273,16 +412,38 @@ const SolanaAiAgent = () => {
           result.signature
         }\n\nRecipient received: ${result.fee.recipientAmountInSol.toFixed(
           6
-        )} SOL\nService fee: ${result.fee.feeInSol.toFixed(6)} SOL (${
-          result.fee.feePercentage
-        }%)`
+        )} SOL`
       );
 
       // Refresh balance
       await fetchWalletBalance();
     } catch (err) {
       console.error("Transfer error:", err);
-      addAssistantMessage(`Transaction failed: ${err.message}`);
+
+      // Handle different error types
+      if (err.message?.includes("Wallet not connected")) {
+        // The wallet connection was lost
+        setWalletConnected(false);
+        setPublicKey("");
+        addAssistantMessage(
+          "The wallet connection was lost. Please reconnect your wallet and try again."
+        );
+      } else if (
+        err.message?.includes("User rejected") ||
+        err.message?.includes("User denied") ||
+        err.message?.includes("Transaction rejected") ||
+        err.message?.includes("cancelled by user") ||
+        err.message?.includes("canceled by user") ||
+        err.name === "WalletSignTransactionError" ||
+        err.code === 4001
+      ) {
+        // User cancelled the transaction
+        addAssistantMessage(
+          "You cancelled the transaction. No SOL was transferred."
+        );
+      } else {
+        addAssistantMessage(`Transaction failed: ${err.message}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -365,15 +526,11 @@ IMPORTANT INSTRUCTIONS:
         apiUrl = process.env.REACT_APP_API_URL || "http://localhost:3001/api";
       }
 
-      console.log("Using API URL:", apiUrl);
-
       // Prepare request data
       const requestData = {
         messages: claudeMessages,
         system: systemPrompt,
       };
-
-      console.log("Request payload size:", JSON.stringify(requestData).length);
 
       // Call our backend proxy
       const response = await fetch(`${apiUrl}/claude`, {
@@ -560,7 +717,6 @@ IMPORTANT INSTRUCTIONS:
       action.type === "check_slot" &&
       (response.includes("slot") || response.includes("block"))
     ) {
-      console.log("Skipping redundant slot check action");
       return false;
     }
 
@@ -570,7 +726,6 @@ IMPORTANT INSTRUCTIONS:
       !action.address &&
       (response.includes("balance") || response.includes("SOL"))
     ) {
-      console.log("Skipping redundant balance check action");
       return false;
     }
 
@@ -580,7 +735,6 @@ IMPORTANT INSTRUCTIONS:
       response.includes("connected") &&
       response.includes("wallet")
     ) {
-      console.log("Skipping redundant wallet connection action");
       return false;
     }
 
@@ -590,7 +744,6 @@ IMPORTANT INSTRUCTIONS:
       response.includes("disconnect") &&
       response.includes("wallet")
     ) {
-      console.log("Skipping redundant wallet disconnection action");
       return false;
     }
 
@@ -636,6 +789,37 @@ IMPORTANT INSTRUCTIONS:
       processInput();
     }
   };
+
+  // Function to maintain wallet connection state in sync with provider
+  const checkWalletConnectionStatus = useCallback(() => {
+    if (walletConnected) {
+      const isStillConnected = phantomWalletService.isConnected();
+
+      // Check for state mismatch
+      if (!isStillConnected && walletConnected) {
+        setWalletConnected(false);
+        setPublicKey("");
+        // Notify user
+        addAssistantMessage(
+          "Your wallet was disconnected. Please reconnect to continue using Solana features."
+        );
+      }
+    }
+  }, [walletConnected, addAssistantMessage]);
+
+  // Add this useEffect with the connection checking interval
+  useEffect(() => {
+    // Check wallet connection status every 15 seconds
+    const connectionCheckInterval = setInterval(
+      checkWalletConnectionStatus,
+      15000
+    );
+
+    // Clean up interval on unmount
+    return () => {
+      clearInterval(connectionCheckInterval);
+    };
+  }, [checkWalletConnectionStatus]);
 
   return (
     <div className="solana-ai-agent">
