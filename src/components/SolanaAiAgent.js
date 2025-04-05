@@ -336,13 +336,11 @@ IMPORTANT INSTRUCTIONS:
 - For balance checks, include the address parameter if a specific address was provided, otherwise leave it empty.
 - For transfers, always include both recipient address and amount.
 - Only include ONE action tag per response.
-- IMPORTANT: If you include an action tag, DO NOT include the information that will be fetched by that action in your response. For example:
-  - GOOD: "I'll check the current slot for you. <check_slot>"
-  - BAD: "The current slot is ${currentSlot}. <check_slot>"
 - Example: "I'll check your balance. <check_balance:>"
 - Example: "I'll send 1 SOL to that address. <transfer_sol:8xrt45...zQ9,1.0>"
 - If the user wants to check a specific address balance: "I'll check that address. <check_balance:8xrt45...zQ9>"
-- Do NOT include action tags if the user is just asking general questions.
+- DO NOT include action tags if the user is just asking general questions.
+- IMPORTANT: If your response already contains the information (such as current slot number or balance), DO NOT include an action tag. This avoids redundant actions and duplicate messages.
 - Respond conversationally and briefly. Don't overexplain basic concepts unless asked.`;
 
       // Prepare message history for Claude
@@ -510,11 +508,14 @@ IMPORTANT INSTRUCTIONS:
       // Extract action and clean response
       const { response, action } = extractAction(claudeResponse);
 
+      // Check if action is redundant based on response content
+      const shouldExecuteAction = isActionNecessary(response, action);
+
       // Display the cleaned response
       addAssistantMessage(response);
 
-      // Execute action if present
-      if (action) {
+      // Execute action if present and not redundant
+      if (action && shouldExecuteAction) {
         await executeAction(action);
       }
     } catch (error) {
@@ -550,45 +551,54 @@ IMPORTANT INSTRUCTIONS:
     }
   };
 
-  // Execute action extracted from Claude's response
-  const executeAction = async (action) => {
-    // Check if we should skip the action based on the AI response already containing the information
-    const shouldSkipAction = () => {
-      // Get the last assistant message
-      const lastAssistantMessage = [...messages]
-        .reverse()
-        .find((msg) => msg.role === "assistant");
-      if (!lastAssistantMessage) return false;
+  // Check if an action is necessary or if the response already contains the information
+  const isActionNecessary = (response, action) => {
+    if (!action) return false;
 
-      const content = lastAssistantMessage.content.toLowerCase();
-
-      switch (action.type) {
-        case "check_slot":
-          // Skip if the response already mentions the slot number
-          return (
-            content.includes("slot") &&
-            content.includes(currentSlot?.toString() || "")
-          );
-        case "check_balance":
-          // Skip if the response already mentions the balance
-          if (!action.address && walletBalance !== null) {
-            return (
-              content.includes("balance") &&
-              content.includes(walletBalance.toFixed(1).toString())
-            );
-          }
-          return false;
-        default:
-          return false;
-      }
-    };
-
-    // Skip if the action would create a duplicate message
-    if (shouldSkipAction()) {
-      console.log(`Skipping duplicate action: ${action.type}`);
-      return;
+    // Skip slot checking action if response already contains slot information
+    if (
+      action.type === "check_slot" &&
+      (response.includes("slot") || response.includes("block"))
+    ) {
+      console.log("Skipping redundant slot check action");
+      return false;
     }
 
+    // Skip balance checking action if response already contains balance information
+    if (
+      action.type === "check_balance" &&
+      !action.address &&
+      (response.includes("balance") || response.includes("SOL"))
+    ) {
+      console.log("Skipping redundant balance check action");
+      return false;
+    }
+
+    // Skip wallet connection action if response indicates connection status
+    if (
+      action.type === "connect_wallet" &&
+      response.includes("connected") &&
+      response.includes("wallet")
+    ) {
+      console.log("Skipping redundant wallet connection action");
+      return false;
+    }
+
+    // Skip wallet disconnection action if response indicates disconnection
+    if (
+      action.type === "disconnect_wallet" &&
+      response.includes("disconnect") &&
+      response.includes("wallet")
+    ) {
+      console.log("Skipping redundant wallet disconnection action");
+      return false;
+    }
+
+    return true;
+  };
+
+  // Execute action extracted from Claude's response
+  const executeAction = async (action) => {
     switch (action.type) {
       case "connect_wallet":
         await handleWalletConnection();
