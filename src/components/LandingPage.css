@@ -321,3 +321,59 @@
     margin-bottom: 1.5rem;
   }
 }
+
+/* Animations */
+@keyframes floatUp {
+  0% {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Contract Address styles */
+.contract-address-landing {
+  transition: all 0.3s ease;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.contract-address-landing:hover {
+  background-color: rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
+}
+
+.contract-address-landing-footer {
+  transition: all 0.3s ease;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.contract-address-landing-footer:hover {
+  background-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-1px);
+}
+
+.contract-address-landing .text-black\/70,
+.contract-address-landing-footer .text-white\/70 {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+}
+
+.contract-address-landing:hover .text-black\/70,
+.contract-address-landing-footer:hover .text-white\/70 {
+  overflow: visible;
+  white-space: normal;
+  word-break: break-all;
+  max-width: none;
+  position: relative;
+  z-index: 10;
+  background-color: inherit;
+  padding: 0.25rem;
+}
+
+/* Custom shape divider */
