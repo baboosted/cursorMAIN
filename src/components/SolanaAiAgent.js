@@ -839,6 +839,12 @@ IMPORTANT INSTRUCTIONS:
                 </div>
               </div>
             )}
+            <div className="contract-address">
+              <span className="ca-label">CA:</span>
+              <span className="ca-value">
+                EUNDD1qi6nRjR25yCcXAYKsBDbVPtUrjFhtUmqsWpump
+              </span>
+            </div>
             <button
               onClick={
                 walletConnected ? handleDisconnect : handleWalletConnection
@@ -920,9 +926,17 @@ IMPORTANT INSTRUCTIONS:
           </div>
         </div>
       </div>
-      <Link to="/" className="home-button">
-        Exit Pathos
-      </Link>
+      <div className="app-footer">
+        <div className="contract-address-footer">
+          <span className="ca-label">CA:</span>
+          <span className="ca-value">
+            EUNDD1qi6nRjR25yCcXAYKsBDbVPtUrjFhtUmqsWpump
+          </span>
+        </div>
+        <Link to="/" className="home-button">
+          Exit Pathos
+        </Link>
+      </div>
     </div>
   );
 };
